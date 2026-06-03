@@ -1,30 +1,60 @@
-# Task 6: Build a CI workflow that runs on pull requests and pushes to main.
-#
-# See the assignment chapter for the required steps and commands.
-# Fill in the TODO values below.
+# NOTE on Task 7 (ACR push): you do NOT need to add `azure/login` or `docker
+# push` steps to this file. GitHub blocks repository secrets from running on
+# pull_request workflows that come from a fork, so an `azure/login` step here
+# would fail. A central workflow named "Grade ACR push" on the assignment
+# repo's main branch builds your Dockerfile and pushes it to ACR for you, and
+# comments the image URL on your PR. Your Task 7 deliverable is the
+# `assets/acr_push_week5.png` screenshot (taken from a local `docker push`).
 
 name: CI
 
 on:
   push:
-    branches: ["TODO-replace-with-main"]
+    branches: ["main"]
   pull_request:
 
 jobs:
   test:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
       - name: Lint
-        run: echo "TODO implement this step"
+        run: ruff check src tests
+
       - name: Format
-        run: echo "TODO implement this step"
+        run: ruff format --check src tests
+
       - name: Test
-        run: echo "TODO implement this step"
+        run: GITHUB_USERNAME=mohammedalfakih-dev pytest -q
+
       - name: Build image
-        run: echo "TODO implement this step"
+        run: docker build -t mohammedalfakih-dev-pipeline:${{ github.sha }} .
+
+      # The next three steps need the AZURE_CREDENTIALS secret, which GitHub
+      # withholds on pull_request runs from forks for security. The `if:` guard
+      # skips them on fork PRs so CI stays green; they still run on direct
+      # pushes to main and on PRs opened inside the assignment repo itself.
+      - name: Azure login
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: ACR login
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: az acr login --name hyfregistry
+
+      - name: Push image
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: |
+          docker tag mohammedalfakih-dev-pipeline:${{ github.sha }} hyfregistry.azurecr.io/mohammedalfakih-dev-pipeline:${{ github.sha }}
+          docker push hyfregistry.azurecr.io/mohammedalfakih-dev-pipeline:${{ github.sha }}

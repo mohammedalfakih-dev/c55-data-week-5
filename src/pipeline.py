@@ -1,59 +1,54 @@
 """
 Week 5 assignment: containerised data pipeline.
-
-Tasks:
-- Task 1: confirm this script runs locally before touching the Dockerfile.
-- Task 5: read all configuration from environment variables (no hardcoded values).
-
-Replace every `raise NotImplementedError` below with a real implementation.
 """
 
 import logging
+import os
 from pathlib import Path
+
+from src.clean import clean_sales, load_and_explore
+from src.ingest import download_inputs, upload_outputs
+from src.report import build_reports, write_outputs
+from src.transform import join_customers
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
 def get_config() -> dict:
-    """
-    Return configuration read from environment variables.
+    github_username = os.getenv("GITHUB_USERNAME")
+    if not github_username:
+        raise RuntimeError("GITHUB_USERNAME environment variable is required")
 
-    Required variable: API_KEY
-    Optional variable: OUTPUT_DIR (default "output")
-
-    Raise RuntimeError with a clear message if a required variable is missing.
-    """
-    raise NotImplementedError("Task 5: read API_KEY and OUTPUT_DIR from the environment")
-
-
-def fetch_data(api_key: str) -> list[dict]:
-    """
-    Simulate fetching records from an external API.
-
-    Return a list of at least one dict representing a record.
-    In a real pipeline you would call requests.get(...) here.
-    """
-    raise NotImplementedError("Task 1: return at least one sample record")
-
-
-def save_results(records: list[dict], output_dir: Path) -> None:
-    """
-    Write each record as a line to output_dir/results.txt.
-
-    Create output_dir if it does not exist.
-    Log the number of records written.
-    """
-    raise NotImplementedError("Task 1: write records to output_dir/results.txt")
+    return {
+        "github_username": github_username,
+        "data_dir": os.getenv("DATA_DIR", "data"),
+        "output_dir": os.getenv("OUTPUT_DIR", "output"),
+        "upload_to_azure": os.getenv("UPLOAD_TO_AZURE", "false").lower() == "true",
+    }
 
 
 def run() -> None:
     config = get_config()
-    logger.info("starting pipeline")
-    records = fetch_data(config["api_key"])
+
+    data_dir = Path(config["data_dir"])
     output_dir = Path(config["output_dir"])
-    save_results(records, output_dir)
-    logger.info("pipeline complete")
+
+    logger.info("Starting Week 4 Pandas pipeline")
+
+    download_inputs(data_dir)
+
+    sales_raw, customers_raw = load_and_explore(data_dir)
+    sales_clean = clean_sales(sales_raw)
+    enriched = join_customers(sales_clean, customers_raw)
+
+    reports = build_reports(enriched)
+    write_outputs(reports, output_dir)
+
+    if config["upload_to_azure"]:
+        upload_outputs(output_dir, config["github_username"])
+
+    logger.info("Pipeline complete")
 
 
 if __name__ == "__main__":
